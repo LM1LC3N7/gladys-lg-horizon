@@ -123,8 +123,12 @@ jeton de rafraîchissement (toutes les 12 heures au plus).
 
 L'intégration parle seulement au cloud de votre opérateur : en HTTPS pour l'API
 et par une WebSocket sécurisée (TLS) pour le MQTT. Elle lit la liste des
-décodeurs, la liste des chaînes et le titre de ce qui est regardé ; elle
-n'envoie rien d'autre que les touches demandées.
+décodeurs, la liste des chaînes et le titre de ce qui est regardé. Elle
+envoie aux décodeurs, par le MQTT de l'opérateur : les touches demandées,
+l'annonce de son client à chaque connexion (comme l'application, un statut
+« en marche » sur son propre sujet), et des demandes d'état d'affichage
+(`CPE.getUiStatus`) à la connexion, après une commande, à la fin d'un
+programme et toutes les 15 minutes.
 
 ## Remerciements
 

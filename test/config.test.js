@@ -1,11 +1,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_CONFIG, normalizeConfig } from '../src/config.js';
+import { DEFAULT_CONFIG, credentialDigest, normalizeConfig } from '../src/config.js';
 import { TIMINGS } from '../src/constants.js';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FileStore, MemoryStore, emptyData, sanitize } from '../src/store.js';
+import { FileStore, MemoryStore, emptyData, newSalt, sanitize } from '../src/store.js';
+
+test('the file store: concurrent writes are queued, the file is never corrupt', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'lg-horizon-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new FileStore({ dir });
+  const saves = [];
+  for (let i = 0; i < 25; i += 1) {
+    const data = emptyData();
+    data.boxes[`BOX-${i}`] = { id: `BOX-${i}`, name: 'x'.repeat(i * 50), platform: '' };
+    saves.push(store.save(data));
+    if (i % 5 === 0) {
+      // Read while writes are queued: always a whole file, never a torn one.
+      JSON.parse(await readFile(join(dir, 'lg-horizon.json'), 'utf8').catch(() => '{}'));
+    }
+  }
+  await Promise.all(saves);
+  await store.flush();
+  assert.deepEqual(Object.keys((await store.load()).boxes), ['BOX-24'], 'the last save wins');
+  assert.deepEqual(
+    (await readdir(dir)).filter((f) => f.endsWith('.tmp')),
+    [],
+    'no temporary file left',
+  );
+});
 
 test('the file store: written atomically, an unreadable file moved aside', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'lg-horizon-'));
@@ -27,15 +51,26 @@ test('the file store: written atomically, an unreadable file moved aside', async
 });
 
 test('configuration: operator, credentials by kind of login, digest', () => {
-  const ziggo = normalizeConfig({ operator: 'nl', username: ' me ', password: ' pw ' });
+  const salt = newSalt();
+  const ziggo = normalizeConfig({ operator: 'nl', username: ' me ', password: ' pw ' }, salt);
   assert.equal(ziggo.operator.name, 'Ziggo (NL)');
   assert.deepEqual(ziggo.credentials, { username: 'me', password: ' pw ', refreshToken: '' });
   assert.equal(ziggo.ready, true);
   assert.match(ziggo.fingerprint, /^[0-9a-f]{64}$/);
   assert.notEqual(
     ziggo.fingerprint,
-    normalizeConfig({ operator: 'nl', username: 'me', password: 'pw' }).fingerprint,
+    normalizeConfig({ operator: 'nl', username: 'me', password: 'pw' }, salt).fingerprint,
   );
+  // scrypt with the salt: the same credentials under another salt give another digest.
+  assert.equal(
+    ziggo.fingerprint,
+    credentialDigest('nl', { username: 'me', password: ' pw ', refreshToken: '' }, salt),
+  );
+  assert.notEqual(
+    ziggo.fingerprint,
+    normalizeConfig({ operator: 'nl', username: 'me', password: ' pw ' }, newSalt()).fingerprint,
+  );
+  assert.equal(normalizeConfig({ operator: 'nl' }).fingerprint, undefined, 'no salt, no digest');
 
   // Refresh-token operators ignore a typed user name and password.
   const telenet = normalizeConfig({ operator: 'be-nl', username: 'me', password: 'pw' });

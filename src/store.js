@@ -9,13 +9,15 @@
 //            the credentials it came from;
 //   block    a refusal of the credentials (digest, reason, time): no new
 //            attempt until the credentials change or "Reconnect" is clicked;
-//   pause    the end of a pause asked by the cloud (429).
+//   pause    the end of a pause asked by the cloud (429);
+//   salt     the random salt of the credential digests (scrypt).
 //
 // The box ids come from the network: the box table has no prototype, and an
 // id that is not a plain identifier is never a key.
 // -----------------------------------------------------------------------------
 
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { LIMITS, TIMINGS } from './constants.js';
 import { isSafeId } from './horizon/parse.js';
@@ -25,9 +27,15 @@ export const emptyData = () => ({
   refresh: null,
   block: null,
   pause: null,
+  /** The random salt of the credential digests (src/config.js `credentialDigest`). */
+  salt: null,
 });
 
 const HEX = /^[0-9a-f]{64}$/;
+const SALT = /^[0-9a-f]{32}$/;
+
+/** A new random salt. */
+export const newSalt = () => randomBytes(16).toString('hex');
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const shortText = (v, max) => (typeof v === 'string' && v.length <= max ? v : undefined);
 
@@ -69,6 +77,9 @@ export function sanitize(data, now = Date.now()) {
     // A saved end is never trusted beyond the longest pause.
     base.pause = { until: Math.min(p.until, now + TIMINGS.pauseMax) };
   }
+  if (typeof data.salt === 'string' && SALT.test(data.salt)) {
+    base.salt = data.salt;
+  }
   return base;
 }
 
@@ -77,6 +88,9 @@ export class FileStore {
     this.dir = dir;
     this.path = join(dir, name);
     this.corrupted = false;
+    /** The writes, one after the other: the last save always lands last. */
+    this.queue = Promise.resolve();
+    this.writes = 0;
   }
 
   /**
@@ -102,11 +116,40 @@ export class FileStore {
     }
   }
 
-  async save(data) {
+  /**
+   * Saves a snapshot of `data` (taken now), after the writes already queued.
+   * Each write goes to its own temporary file, flushed to the disk, then
+   * renamed over the file: a crash never leaves a half-written file.
+   */
+  save(data) {
+    const text = JSON.stringify(data);
+    const run = this.queue.then(() => this.write(text));
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  /** Resolves once every queued write ended. */
+  flush() {
+    return this.queue;
+  }
+
+  async write(text) {
     await mkdir(this.dir, { recursive: true });
-    const temporary = `${this.path}.tmp`;
-    await writeFile(temporary, JSON.stringify(data), { mode: 0o600 });
-    await rename(temporary, this.path);
+    this.writes += 1;
+    const temporary = `${this.path}.${process.pid}.${this.writes}.${randomBytes(4).toString('hex')}.tmp`;
+    const handle = await open(temporary, 'w', 0o600);
+    try {
+      await handle.writeFile(text);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await rename(temporary, this.path);
+    } catch (err) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw err;
+    }
   }
 }
 
@@ -126,5 +169,9 @@ export class MemoryStore {
     // Through JSON, as the file store: what a restart would read back.
     this.data = JSON.parse(JSON.stringify(data));
     this.saves += 1;
+  }
+
+  flush() {
+    return Promise.resolve();
   }
 }

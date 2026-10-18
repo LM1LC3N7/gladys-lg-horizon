@@ -75,8 +75,11 @@ id>` is assumed, `<hh>/#` catches the others);
   publishes; writing a client would mean a WebSocket client (TLS, framing,
   masking) plus MQTT packets, QoS 2 flows and keepalive, a lot of untested
   code for one module. MQTT.js is the reference Node client (weekly releases,
-  millions of downloads, used by gladys-yolink already), its only extra
-  runtime dependency here is `ws` (MIT), already pulled by the SDK. Its own
+  millions of downloads, used by gladys-yolink already). It brings about 40
+  transitive runtime packages (45 in the production tree with the SDK and
+  `ws`), all under permissive licences (MIT 39, ISC 3, Apache-2.0,
+  BSD-3-Clause, 0BSD), and `npm audit --omit=dev` is clean. Its frames are
+  capped (`wsOptions.maxPayload` 256 KB). Its own
   reconnection is off (`reconnectPeriod: 0`): every connection needs a fresh
   MQTT token, and the delays are ours.
 - Standby: **two push buttons** (`button/push` "Wake up" and "Standby"), not a
@@ -143,3 +146,31 @@ id>` is assumed, `<hh>/#` catches the others);
   `docker_image` tag, set by hand at milestone 1: the one exception to
   "versions belong to the Release workflow", because the template's 1.0.0 and
   its image were someone else's. The first patch release gives 0.1.1.
+
+### Review fixes (2026-10-18)
+
+- The playback state is forgotten when the live link drops or the session
+  ends: play/pause is refused until a UI status arrives again.
+- A UI status sets the playback state and ends the play guard at once,
+  before any lookup; the lookups only fill the channel and the program.
+- A refresh token received is never thrown away: the session always hands it
+  over, even once closed, and the app keeps it while the credentials it came
+  from are still configured. The stored token is read at each renewal (a
+  getter), and a restart of the session with the same credentials ("Reconnect")
+  waits first for a renewal in flight (at most `httpTimeout`).
+- /data writes go through a chained queue, each to its own temporary file,
+  flushed (`FileHandle.sync()`) before the rename; `stop()` waits for the
+  queue.
+- A 429 of a login or renewal (`ensure`, the renewal after a 401) pauses
+  everything like any other 429; the live link credentials pause too.
+- A renewal after a 401 that did not end it spaces the next one: 1 min, then
+  15 min, then 1 h (back to 1 min once a call goes through).
+- Any refusal of the refresh endpoint is reported as a refused token.
+- The credential digest is scrypt (N 16384, r 8, p 1) with a random 16-byte
+  salt kept beside it in /data; a /data without salt gets one and drops the
+  old refusal and refresh token (no digest to compare them with).
+- After the MQTT CONNACK, the SUBACK is awaited `mqttConnectTimeout` (20 s) at
+  most, then the connection is closed and tried again later.
+- A failed lookup is not asked again for 10 min; lookups run one at a time per
+  box, only for the latest UI status (older ones waiting are skipped).
+- The live link removes only the listeners it added to an MQTT client.

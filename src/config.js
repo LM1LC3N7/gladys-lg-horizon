@@ -3,7 +3,7 @@
 // rest of the code never deals with strings typed in a form.
 // -----------------------------------------------------------------------------
 
-import { createHash } from 'node:crypto';
+import { scryptSync } from 'node:crypto';
 import { OPERATORS } from './constants.js';
 
 /** Defaults, mirrored by the manifest (checked by test/manifest.test.js). */
@@ -17,7 +17,7 @@ const clean = (value, max) => {
   return text.length <= max ? text : '';
 };
 
-export function normalizeConfig(raw = {}) {
+export function normalizeConfig(raw = {}, salt = undefined) {
   const c = {
     ...DEFAULT_CONFIG,
     ...Object.fromEntries(Object.entries(raw ?? {}).filter(([, v]) => v != null)),
@@ -41,24 +41,34 @@ export function normalizeConfig(raw = {}) {
     credentials,
     ready,
     language: c.language === 'en' ? 'en' : 'fr',
-    fingerprint: fingerprint(operatorKey, credentials),
+    /** Set by the app once the salt of /data is known (`credentialDigest`). */
+    fingerprint: salt ? credentialDigest(operatorKey, credentials, salt) : undefined,
   };
 }
 
+let memo = { key: undefined, digest: undefined };
+
 /**
  * A digest of what the user typed to log in: a refusal is kept against it,
- * and only new credentials (or the "Reconnect" button) try again. The digest
- * alone is written to /data, never the password.
+ * and only new credentials (or the "Reconnect" button) try again. scrypt with
+ * a random salt kept beside it in /data: the digest alone is written there,
+ * never the password, and it cannot be checked against guesses cheaply.
  */
-export function fingerprint(operatorKey, credentials) {
-  return createHash('sha256')
-    .update(
-      JSON.stringify([
-        operatorKey,
-        credentials.username ?? '',
-        credentials.password ?? '',
-        credentials.refreshToken ?? '',
-      ]),
-    )
-    .digest('hex');
+export function credentialDigest(operatorKey, credentials, salt) {
+  const key = JSON.stringify([
+    operatorKey,
+    credentials.username ?? '',
+    credentials.password ?? '',
+    credentials.refreshToken ?? '',
+  ]);
+  const cacheKey = `${salt}\n${key}`;
+  if (memo.key !== cacheKey) {
+    memo = {
+      key: cacheKey,
+      digest: scryptSync(key, Buffer.from(salt, 'hex'), 32, { N: 16384, r: 8, p: 1 }).toString(
+        'hex',
+      ),
+    };
+  }
+  return memo.digest;
 }

@@ -35,4 +35,19 @@ the notes of the version's GitHub Release.
 - `LICENSE` (Apache-2.0) and `THIRD_PARTY_NOTICES.md` (lghorizon, MIT), copied
   into the image.
 
+### Fixed
+
+- Play/pause no longer decides on a playback state from before a drop of the
+  live link, nor waits for a program lookup to follow a new UI status.
+- A refresh token received while the session restarts is kept and used, never
+  lost (which would have refused the next login).
+- /data writes are queued and flushed to the disk before replacing the file.
+- A 429 answered to a login or renewal pauses every request, like any other.
+- Renewals after a lasting 401 are spaced 1 min, 15 min, then 1 h.
+- A refused refresh token is always reported as such.
+- The credential digest uses scrypt with a random salt.
+- A broker that never answers the subscription is closed and tried again later;
+  WebSocket frames are capped.
+- Failed program lookups wait 10 minutes; one lookup at a time per box.
+
 [Unreleased]: https://github.com/LM1LC3N7/gladys-lg-horizon/commits/main

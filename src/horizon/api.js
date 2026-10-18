@@ -80,21 +80,37 @@ export class HorizonApi {
   }
 
   /** One GET, JSON answer. */
+  /** A session call (login, renewal): its 429 pauses everything too. */
+  async auth(task) {
+    try {
+      return await task();
+    } catch (err) {
+      if (err?.kind === KINDS.RATE_LIMITED) {
+        this.onRateLimited(err);
+      }
+      throw err;
+    }
+  }
+
   async get(url, { timeoutMs = this.timings.httpTimeout } = {}) {
     this.checkPause();
-    await this.session.ensure();
+    await this.auth(() => this.session.ensure());
     this.checkPause();
     let { answer, token } = await this.send(url, timeoutMs);
     if (answer.status === 401) {
-      const retry = await this.session.renewAfterUnauthorized(token);
+      const retry = await this.auth(() => this.session.renewAfterUnauthorized(token));
       if (!retry) {
         throw new HorizonError(KINDS.UNAUTHORIZED, 'The access token is refused (401)');
       }
       this.checkPause();
       ({ answer } = await this.send(url, timeoutMs));
       if (answer.status === 401) {
+        this.session.unauthorizedPersists?.();
         throw new HorizonError(KINDS.UNAUTHORIZED, 'The access token is refused (401)');
       }
+    }
+    if (answer.status >= 200 && answer.status < 300) {
+      this.session.authorized?.();
     }
     if (answer.status === 429) {
       const err = new HorizonError(KINDS.RATE_LIMITED, 'The cloud limits the requests (429)', {

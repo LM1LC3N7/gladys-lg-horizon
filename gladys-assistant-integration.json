@@ -3,8 +3,8 @@
   "type": "device",
   "name": "LG Horizon",
   "description": {
-    "en": "Ziggo, Telenet, Sunrise and Virgin Media LG Horizon set-top boxes, through the operator cloud.",
-    "fr": "Décodeurs LG Horizon de Ziggo, Telenet, Sunrise et Virgin Media, par le cloud de l'opérateur."
+    "en": "LG Horizon boxes of Ziggo, Telenet, BASE, Sunrise, Virgin Media and UPC, via the operator cloud.",
+    "fr": "Décodeurs LG Horizon de Ziggo, Telenet, BASE, Sunrise, Virgin Media et UPC, par le cloud opérateur."
   },
   "version": "0.1.0",
   "docker_image": "ghcr.io/lm1lc3n7/gladys-lg-horizon:0.1.0",
@@ -21,8 +21,8 @@
         "fr": "Votre compte d'opérateur TV"
       },
       "description": {
-        "en": "Brings the LG Horizon set-top boxes of your account into Gladys, through the cloud of your operator: power state, channel and program shown, playing or paused, and buttons to wake up, put in standby, play, pause, and go to the next or previous channel. Ziggo and Virgin Media Ireland accounts log in with the user name and password; Telenet, BASE, Sunrise and Virgin Media UK only with a refresh token read from the operator's web TV site (see the guide). No volume: the operator's cloud cannot change it. Never tested with a real account. Unofficial, not affiliated with LG, Liberty Global or the operators.",
-        "fr": "Amène dans Gladys les décodeurs LG Horizon de votre compte, par le cloud de votre opérateur : état allumé ou en veille, chaîne et programme affichés, lecture ou pause, et des boutons pour allumer, mettre en veille, lire, mettre en pause, passer à la chaîne suivante ou précédente. Les comptes Ziggo et Virgin Media Irlande se connectent avec l'identifiant et le mot de passe ; Telenet, BASE, Sunrise et Virgin Media UK seulement avec un jeton de rafraîchissement lu sur le site TV web de l'opérateur (voir le guide). Pas de volume : le cloud de l'opérateur ne sait pas le changer. Jamais testé avec un vrai compte. Non officiel, sans lien avec LG, Liberty Global ni les opérateurs."
+        "en": "Brings the LG Horizon set-top boxes of your account into Gladys, through the cloud of your operator: power state, channel and program shown, playing or paused, and buttons to wake up, put in standby, play, pause, and go to the next or previous channel. Ziggo, Virgin Media Ireland and UPC (Poland) accounts log in with the user name and password; Telenet, BASE, Sunrise and Virgin Media UK only with a refresh token read from the operator's web TV site (see the guide). No volume: the operator's cloud cannot change it. Never tested with a real account. Unofficial, not affiliated with LG, Liberty Global or the operators.",
+        "fr": "Amène dans Gladys les décodeurs LG Horizon de votre compte, par le cloud de votre opérateur : état allumé ou en veille, chaîne et programme affichés, lecture ou pause, et des boutons pour allumer, mettre en veille, lire, mettre en pause, passer à la chaîne suivante ou précédente. Les comptes Ziggo, Virgin Media Irlande et UPC (Pologne) se connectent avec l'identifiant et le mot de passe ; Telenet, BASE, Sunrise et Virgin Media UK seulement avec un jeton de rafraîchissement lu sur le site TV web de l'opérateur (voir le guide). Pas de volume : le cloud de l'opérateur ne sait pas le changer. Jamais testé avec un vrai compte. Non officiel, sans lien avec LG, Liberty Global ni les opérateurs."
       },
       "links": [
         {

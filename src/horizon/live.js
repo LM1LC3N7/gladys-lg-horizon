@@ -66,6 +66,9 @@ export class LiveLink {
     this.upAt = undefined;
     this.failures = 0;
     this.timer = undefined;
+    this.subackTimer = undefined;
+    /** `{ client, handlers }`: the listeners this link added (removed one by one). */
+    this.attached = undefined;
     /** When the next attempt is due (for the status), or undefined. */
     this.nextAttemptAt = undefined;
     this.running = false;
@@ -108,10 +111,29 @@ export class LiveLink {
     this.client = undefined;
     this.up = false;
     this.upAt = undefined;
-    client?.removeAllListeners?.();
-    // A late error of the closed client must not crash the process.
-    client?.on?.('error', () => {});
+    this.detach(client);
     client?.end?.(true);
+  }
+
+  /** Removes this link's own listeners (and its SUBACK timer) from `client`, nothing else. */
+  detach(client) {
+    this.clearSubackTimer();
+    if (!client || this.attached?.client !== client) {
+      return;
+    }
+    for (const [event, handler] of Object.entries(this.attached.handlers)) {
+      client.removeListener(event, handler);
+    }
+    this.attached = undefined;
+    // A late error of the closed client must not crash the process.
+    client.on('error', () => {});
+  }
+
+  clearSubackTimer() {
+    if (this.subackTimer) {
+      this.timers.clearTimeout(this.subackTimer);
+      this.subackTimer = undefined;
+    }
   }
 
   retry(minimum = 0) {
@@ -170,61 +192,84 @@ export class LiveLink {
       reconnectPeriod: 0,
       connectTimeout: this.timings.mqttConnectTimeout,
       resubscribe: false,
+      // A message is at most 64 KB (LIMITS.messageBytes): no larger frame is read.
+      wsOptions: { maxPayload: 256 * 1024 },
     });
     this.client = client;
     const hh = this.householdId;
-    client.on('connect', () => {
-      if (this.client !== client) {
-        return;
-      }
-      this.upAt = this.now();
-      // The running states of the boxes are required. The other topics of
-      // the household (the answers to this client, `#` below the household:
-      // the reference library subscribes to `#`) are a bonus: a refusal of
-      // one of them is not an error.
-      client.subscribe(`${hh}/+/status`, { qos: 0 }, (err) => {
+    const handlers = {
+      connect: () => {
         if (this.client !== client) {
           return;
         }
-        if (err) {
-          this.logger?.warn('Live link: subscription refused');
-          client.end(true);
+        this.upAt = this.now();
+        // A broker that accepts the connection but never answers the
+        // subscription: closed after `mqttConnectTimeout`, tried again later.
+        this.clearSubackTimer();
+        this.subackTimer = this.timers.setTimeout(() => {
+          this.subackTimer = undefined;
+          if (this.client === client && !this.up) {
+            this.logger?.warn('Live link: no answer to the subscription');
+            client.end(true);
+          }
+        }, this.timings.mqttConnectTimeout);
+        // The running states of the boxes are required. The other topics of
+        // the household (the answers to this client, `#` below the household:
+        // the reference library subscribes to `#`) are a bonus: a refusal of
+        // one of them is not an error.
+        client.subscribe(`${hh}/+/status`, { qos: 0 }, (err) => {
+          if (this.client !== client) {
+            return;
+          }
+          this.clearSubackTimer();
+          if (err) {
+            this.logger?.warn('Live link: subscription refused');
+            client.end(true);
+            return;
+          }
+          for (const topic of [hh, `${hh}/${this.clientId}`, `${hh}/#`]) {
+            client.subscribe(topic, { qos: 0 }, () => {});
+          }
+          this.up = true;
+          this.logger?.info('Live link connected');
+          this.onUp();
+        });
+      },
+      message: (topic, payload) => this.message(topic, payload),
+      error: (err) => {
+        // MQTT.js errors carry no credentials; the token is never logged.
+        this.logger?.warn(`Live link: ${err?.message ?? err}`);
+      },
+      close: () => {
+        if (this.client !== client) {
           return;
         }
-        for (const topic of [hh, `${hh}/${this.clientId}`, `${hh}/#`]) {
-          client.subscribe(topic, { qos: 0 }, () => {});
-        }
-        this.up = true;
-        this.logger?.info('Live link connected');
-        this.onUp();
-      });
-    });
-    client.on('message', (topic, payload) => this.message(topic, payload));
-    client.on('error', (err) => {
-      // MQTT.js errors carry no credentials; the token is never logged.
-      this.logger?.warn(`Live link: ${err?.message ?? err}`);
-    });
-    client.on('close', () => {
-      if (this.client !== client) {
-        return;
-      }
-      const wasUp = this.up;
-      const stable = this.upAt !== undefined && this.now() - this.upAt >= this.timings.mqttStable;
-      this.client = undefined;
-      this.up = false;
-      this.upAt = undefined;
-      client.removeAllListeners();
-      client.on('error', () => {});
-      if (stable) {
-        this.failures = 0;
-      }
-      if (wasUp) {
-        this.logger?.warn('Live link disconnected');
-      }
-      this.retry();
-      // After `retry`: the status can say when the next attempt is.
-      this.onDown();
-    });
+        this.closed(client);
+      },
+    };
+    for (const [event, handler] of Object.entries(handlers)) {
+      client.on(event, handler);
+    }
+    this.attached = { client, handlers };
+  }
+
+  /** The connection of `client` closed: spaced retry, the count reset only after a stable link. */
+  closed(client) {
+    const wasUp = this.up;
+    const stable = this.upAt !== undefined && this.now() - this.upAt >= this.timings.mqttStable;
+    this.client = undefined;
+    this.up = false;
+    this.upAt = undefined;
+    this.detach(client);
+    if (stable) {
+      this.failures = 0;
+    }
+    if (wasUp) {
+      this.logger?.warn('Live link disconnected');
+    }
+    this.retry();
+    // After `retry`: the status can say when the next attempt is.
+    this.onDown();
   }
 
   message(topic, payload) {

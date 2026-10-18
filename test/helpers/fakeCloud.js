@@ -132,6 +132,12 @@ export function fakeCloud({ operator = OPERATORS.nl, now = Date.now } = {}) {
     );
     const body = init.body ? JSON.parse(init.body) : undefined;
     cloud.requests.push({ method: init.method ?? 'GET', url: String(url), headers, body });
+    // A request held until the test opens the gate (`cloud.hold(part)`).
+    for (const [part, gate] of cloud.gates) {
+      if (String(url).includes(part)) {
+        await gate.promise;
+      }
+    }
     if (target.origin === api && target.pathname.startsWith('/auth-service/v1/authorization')) {
       return authAnswer(body, target.pathname);
     }
@@ -179,6 +185,20 @@ export function fakeCloud({ operator = OPERATORS.nl, now = Date.now } = {}) {
       });
     }
     return json(404, {});
+  };
+
+  /** Holds the requests whose URL contains `part`; returns the function that lets them go. */
+  cloud.gates = new Map();
+  cloud.hold = (part) => {
+    let open;
+    const promise = new Promise((resolve) => {
+      open = resolve;
+    });
+    cloud.gates.set(part, { promise });
+    return () => {
+      cloud.gates.delete(part);
+      open();
+    };
   };
 
   /** The requests made to a path containing `part`. */

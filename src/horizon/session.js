@@ -64,12 +64,13 @@ export class HorizonSession {
    * @param {object} options
    * @param {{ apiUrl: string }} options.operator
    * @param {{ username?: string, password?: string, refreshToken?: string }} options.credentials
-   *   what the user typed; `storedRefreshToken` (from /data) wins over the typed token.
+   *   what the user typed; the token of `storedRefreshToken()` (from /data, read
+   *   at each renewal) wins over the typed one.
    */
   constructor({
     operator,
     credentials,
-    storedRefreshToken,
+    storedRefreshToken = () => undefined,
     onRefreshToken = () => {},
     request = httpRequest,
     fetchImpl,
@@ -79,7 +80,8 @@ export class HorizonSession {
     this.operator = operator;
     this.username = credentials.username ?? '';
     this.password = credentials.password ?? '';
-    this.refreshToken = storedRefreshToken || credentials.refreshToken || '';
+    this.storedRefreshToken = storedRefreshToken;
+    this.refreshToken = storedRefreshToken() || credentials.refreshToken || '';
     this.onRefreshToken = onRefreshToken;
     this.request = request;
     this.fetchImpl = fetchImpl;
@@ -92,6 +94,8 @@ export class HorizonSession {
     this.refreshExpiry = undefined;
     this.renewing = undefined;
     this.lastUnauthorizedRenew = -Infinity;
+    /** Renewals after a 401 that did not end it: the spacing grows (1 min, 15 min, 1 h). */
+    this.unauthorizedLevel = 0;
     this.closed = false;
   }
 
@@ -149,6 +153,17 @@ export class HorizonSession {
     return { json, url, setCookies: answer.setCookies };
   }
 
+  /** Hands a new refresh token to the app: always, even for a closed session. */
+  keep(json) {
+    const expiry = Number(json.refreshTokenExpiry);
+    const ms = Number.isFinite(expiry) && expiry > 0 ? expiry * 1000 : undefined;
+    try {
+      this.onRefreshToken({ token: json.refreshToken, expiry: ms });
+    } catch {
+      // Keeping the token is the app's business; the session is valid anyway.
+    }
+  }
+
   apply({ json, url, setCookies }) {
     this.jar.clear();
     this.jar.store(url, setCookies);
@@ -157,11 +172,6 @@ export class HorizonSession {
     this.householdId = json.householdId;
     const expiry = Number(json.refreshTokenExpiry);
     this.refreshExpiry = Number.isFinite(expiry) && expiry > 0 ? expiry * 1000 : undefined;
-    try {
-      this.onRefreshToken({ token: this.refreshToken, expiry: this.refreshExpiry });
-    } catch {
-      // Keeping the token is the app's business; the session is valid anyway.
-    }
   }
 
   /**
@@ -175,12 +185,21 @@ export class HorizonSession {
     }
     if (!this.renewing) {
       const run = async () => {
+        // The newest token kept in /data: another session may have rotated it.
+        const stored = this.storedRefreshToken();
+        if (stored) {
+          this.refreshToken = stored;
+        }
         if (this.refreshToken) {
           try {
             return await this.post('/auth-service/v1/authorization/refresh', {
               refreshToken: this.refreshToken,
             });
           } catch (err) {
+            if (err.kind === KINDS.REFUSED) {
+              // Any refusal of the refresh endpoint is a refusal of the token.
+              err.reason = 'token';
+            }
             const canLogin = this.username !== '' && this.password !== '';
             if (err.kind !== KINDS.REFUSED || !canLogin) {
               throw err;
@@ -197,6 +216,8 @@ export class HorizonSession {
       };
       this.renewing = run()
         .then((answer) => {
+          // The old refresh token no longer works: the new one is never thrown away.
+          this.keep(answer.json);
           if (this.closed) {
             throw new HorizonError(KINDS.NOT_CONNECTED, 'Session closed');
           }
@@ -218,19 +239,32 @@ export class HorizonSession {
 
   /**
    * An API call answered 401 with `token`: renewed once (unless another call
-   * renewed it already), at most once per `unauthorizedRenewSpacing`.
+   * renewed it already). Spaced by `unauthorizedRenewSpacing[level]`: 1 min,
+   * then 15 min and 1 h while renewals do not end the 401.
    * @returns {Promise<boolean>} whether the call may be retried.
    */
   async renewAfterUnauthorized(token) {
     if (this.accessToken !== token && this.accessToken !== undefined) {
       return true;
     }
-    if (this.now() - this.lastUnauthorizedRenew < this.timings.unauthorizedRenewSpacing) {
+    const spacings = this.timings.unauthorizedRenewSpacing;
+    const spacing = spacings[Math.min(this.unauthorizedLevel, spacings.length - 1)];
+    if (this.now() - this.lastUnauthorizedRenew < spacing) {
       return false;
     }
     this.lastUnauthorizedRenew = this.now();
     await this.renew();
     return true;
+  }
+
+  /** The call retried after a renewal was answered 401 again: space the next renewal more. */
+  unauthorizedPersists() {
+    this.unauthorizedLevel += 1;
+  }
+
+  /** A call went through: the 401 spacing is back to the shortest. */
+  authorized() {
+    this.unauthorizedLevel = 0;
   }
 
   /** The base domain of the operator (`ziggogo.tv`...), where ACCESSTOKEN is sent. */

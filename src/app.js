@@ -28,7 +28,7 @@ import {
 import { HorizonSession } from './horizon/session.js';
 import { E, T } from './i18n.js';
 import { COMMANDS, buildDevice, deviceName, featureKey, stateList } from './model.js';
-import { FileStore, emptyData } from './store.js';
+import { FileStore, emptyData, newSalt } from './store.js';
 
 const short = (value) => String(value).slice(0, 32);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -83,6 +83,8 @@ export class HorizonApp {
     this.created = new Set();
     /** `<kind>:<id>` -> lookup result (programs, VOD titles, recordings) */
     this.lookups = new Map();
+    /** `<kind>:<id>` -> when that lookup last failed */
+    this.misses = new Map();
     /** name -> timer handle */
     this.named = new Map();
     this.persistTimer = undefined;
@@ -98,13 +100,13 @@ export class HorizonApp {
    * the core forgot are published again. New credentials start a new session.
    */
   async start(raw = {}, { connected = false } = {}) {
-    this.config = normalizeConfig(raw);
+    await this.loadData();
+    this.config = normalizeConfig(raw, this.data.salt);
     this.started = true;
     if (connected) {
       this.lastStatus = undefined;
       this.gladys.forgetPublishedStates?.();
     }
-    await this.loadData();
     await this.step('read the Gladys devices', () => this.refreshCreated());
     await this.step('publish the devices', () => this.publishDevices());
     if (this.config.fingerprint !== this.activeFingerprint) {
@@ -134,17 +136,25 @@ export class HorizonApp {
     if (this.store.corrupted) {
       this.logger.warn('Unreadable /data/lg-horizon.json moved to lg-horizon.json.bad');
     }
+    if (!this.data.salt) {
+      // A new salt invalidates nothing: no digest was kept without one.
+      this.data.salt = newSalt();
+      this.data.block = null;
+      this.data.refresh = null;
+      this.saveNow();
+    }
   }
 
-  stop() {
+  async stop() {
     this.started = false;
     this.teardown();
     if (this.persistTimer) {
       this.timers.clearTimeout(this.persistTimer);
       this.persistTimer = undefined;
-      return this.store.save(this.data).catch(() => {});
+      this.saveNow();
     }
-    return Promise.resolve();
+    // Every write queued (a rotated refresh token included) lands before the exit.
+    await this.store.flush?.().catch(() => {});
   }
 
   /** Ends the current session: no timer, no live link, nothing in flight kept. */
@@ -160,8 +170,17 @@ export class HorizonApp {
     this.session = undefined;
     this.api = undefined;
     this.guards.clear();
+    this.forgetLive();
+  }
+
+  /**
+   * What the boxes said is no longer followed: no command decides on it,
+   * until the live link reports again (running state, then UI status).
+   */
+  forgetLive() {
     for (const view of this.views.values()) {
       view.fresh = false;
+      view.playing = undefined;
     }
   }
 
@@ -290,25 +309,43 @@ export class HorizonApp {
 
   /** A new session from the configured credentials (and the refresh token kept for them). */
   async restartCloud() {
-    this.teardown();
     const fp = this.config.fingerprint;
+    const renewing = this.session?.renewing;
+    if (renewing && this.activeFingerprint === fp) {
+      // Same credentials: the renewal in flight rotates the refresh token;
+      // its answer is waited for (bounded) so the new session starts from it.
+      let timer;
+      await Promise.race([
+        renewing.catch(() => {}),
+        new Promise((resolve) => {
+          timer = this.timers.setTimeout(resolve, this.timings.httpTimeout);
+        }),
+      ]);
+      this.timers.clearTimeout(timer);
+    }
+    this.teardown();
     this.activeFingerprint = fp;
     this.startAttempts = 0;
     this.renewFailures = 0;
     this.account = undefined;
     this.lookups.clear();
+    this.misses.clear();
     if (this.data.block && this.data.block.fingerprint !== fp) {
       // Other credentials: the old refusal no longer applies.
       this.data.block = null;
       this.persist();
     }
-    const stored = this.data.refresh?.fingerprint === fp ? this.data.refresh.token : undefined;
     const session = new HorizonSession({
       operator: this.config.operator,
       credentials: this.config.credentials,
-      storedRefreshToken: stored,
+      // Read at each renewal: the newest token, whichever session got it.
+      storedRefreshToken: () =>
+        this.data.refresh?.fingerprint === fp ? this.data.refresh.token : undefined,
+      // A token received is never thrown away (the previous one no longer
+      // works): kept while the credentials it came from are still configured,
+      // even when this session was closed in the meantime.
       onRefreshToken: ({ token, expiry }) => {
-        if (this.session === session) {
+        if (this.config.fingerprint === fp) {
           this.data.refresh = { fingerprint: fp, token, expiry: expiry ?? null };
           this.saveNow();
         }
@@ -509,6 +546,9 @@ export class HorizonApp {
       const password = await this.api.mqttToken();
       return { url, username: this.session.householdId, password };
     } catch (err) {
+      if (err.kind === KINDS.RATE_LIMITED) {
+        this.pause(err);
+      }
       if (err.kind === KINDS.RATE_LIMITED || err.kind === KINDS.PAUSED) {
         throw new HorizonError(err.kind, err.message, {
           retryAfterMs: Math.max(0, this.pausedUntil() - this.now()),
@@ -551,10 +591,7 @@ export class HorizonApp {
   }
 
   onLiveDown() {
-    // What the boxes said is no longer followed: no command decides on it.
-    for (const view of this.views.values()) {
-      view.fresh = false;
-    }
+    this.forgetLive();
     this.updateStatus();
   }
 
@@ -615,23 +652,26 @@ export class HorizonApp {
     }
     view.seq += 1;
     const seq = view.seq;
-    const playing =
+    // The playback state and its guard follow the message at once, before any
+    // lookup: a command never decides on the state of an older message.
+    view.playing =
       ui.mode === 'player' && typeof ui.speed === 'number' ? ui.speed !== 0 : undefined;
     const guard = this.guards.get(`${id}:play`);
-    if (guard && typeof playing === 'boolean' && playing === guard.expect) {
+    if (guard && typeof view.playing === 'boolean' && view.playing === guard.expect) {
       this.guards.delete(`${id}:play`);
     }
-    const described = await this.describe(ui);
-    if (seq !== view.seq || view.state !== BOX_STATES.RUNNING) {
+    this.publishBox(id);
+    // The channel and the program: one lookup at a time per box, and only for
+    // the latest message (an older one still waiting is skipped).
+    const previous = view.describing ?? Promise.resolve();
+    const run = previous.then(() => (seq === view.seq ? this.describe(ui) : undefined));
+    view.describing = run.catch(() => {});
+    const described = await run;
+    if (!described || seq !== view.seq || view.state !== BOX_STATES.RUNNING) {
       return;
     }
     view.channel = described.channel;
     view.program = described.program;
-    if (ui.mode === 'player') {
-      view.playing = playing;
-    } else {
-      view.playing = undefined;
-    }
     this.publishBox(id);
     this.scheduleUi(id, described.end);
   }
@@ -658,12 +698,20 @@ export class HorizonApp {
     return (channelId && this.channels.get(channelId)?.name) || NOTHING;
   }
 
-  /** A cached lookup; a failure gives undefined (the channel is still published). */
+  /**
+   * A cached lookup; a failure gives undefined (the channel is still
+   * published) and is not asked again for `lookupRetry`.
+   */
   async lookup(kind, id, task) {
     const key = `${kind}:${id}`;
     if (this.lookups.has(key)) {
       return this.lookups.get(key);
     }
+    const missed = this.misses.get(key);
+    if (missed !== undefined && this.now() - missed < this.timings.lookupRetry) {
+      return undefined;
+    }
+    this.misses.delete(key);
     try {
       const value = await task();
       if (value) {
@@ -675,6 +723,10 @@ export class HorizonApp {
       return value;
     } catch (err) {
       this.logger.debug?.(`Lookup ${kind} failed: ${err.message}`);
+      if (this.misses.size >= LIMITS.eventCache) {
+        this.misses.delete(this.misses.keys().next().value);
+      }
+      this.misses.set(key, this.now());
       if (err.kind === KINDS.REFUSED || err.kind === KINDS.RATE_LIMITED) {
         await this.failed(err, 'other');
       }

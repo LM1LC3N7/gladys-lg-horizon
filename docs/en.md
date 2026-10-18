@@ -115,8 +115,11 @@ The session is renewed by a timer, one day before the refresh token expires
 
 The integration only talks to the cloud of your operator: over HTTPS for the
 API and over a secure WebSocket (TLS) for MQTT. It reads the list of boxes, the
-channel list and the title of what is watched; it sends nothing but the keys
-asked.
+channel list and the title of what is watched. It sends to the boxes, over the
+operator's MQTT: the keys asked, the announcement of its client at each
+connection (like the app, a "running" status on its own topic), and requests
+for the display state (`CPE.getUiStatus`) at connection, after a command, at
+the end of a program and every 15 minutes.
 
 ## Credits
 

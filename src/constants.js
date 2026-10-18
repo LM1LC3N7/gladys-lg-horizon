@@ -124,8 +124,13 @@ export const TIMINGS = Object.freeze({
   renewMin: 10 * 60_000,
   renewMax: 12 * 3_600_000,
   renewRetry: [5 * 60_000, 15 * 60_000, 60 * 60_000],
-  /** After an API call answered 401, the session is renewed at most once per this. */
-  unauthorizedRenewSpacing: 60_000,
+  /**
+   * After an API call answered 401, the session is renewed at most once per
+   * this; the next index each time a renewal did not end the 401.
+   */
+  unauthorizedRenewSpacing: [60_000, 15 * 60_000, 60 * 60_000],
+  /** A program lookup that failed is not asked again before this. */
+  lookupRetry: 10 * 60_000,
   /** A start that failed (network, server) is tried again after these delays. */
   startRetry: [60_000, 2 * 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000],
   /** 429: a pause of this when the answer has no Retry-After, bounded by min and max. */

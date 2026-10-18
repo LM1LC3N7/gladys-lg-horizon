@@ -158,7 +158,9 @@ test('Ziggo: login, the box in Discovery, the live link, states once created', a
 
   // The rotated refresh token is kept in /data, never the password.
   assert.equal(store.data.refresh.token, 'refresh-1');
-  assert.equal(store.data.refresh.fingerprint, normalizeConfig(ZIGGO).fingerprint);
+  assert.equal(store.data.refresh.fingerprint, normalizeConfig(ZIGGO, store.data.salt).fingerprint);
+  assert.match(store.data.salt, /^[0-9a-f]{32}$/);
+  assert.equal(connection.options.wsOptions.maxPayload, 256 * 1024);
   assert.ok(!JSON.stringify(store.data).includes('secret pw'));
 
   assert.equal(gladys.fake.states.length, 0, 'no state before the device is created');
@@ -598,4 +600,184 @@ test('missing credentials: a clear status, nothing sent', async (t) => {
   assert.equal(cloud.requests.length, 0);
   assert.equal(gladys.fake.connectionStatus.connected, false);
   assert.match(gladys.fake.connectionStatus.message.fr, /Sunrise/);
+});
+
+test('A: after the live link drops, play/pause waits for a new UI status', async (t) => {
+  const { gladys, broker, clock, device } = await running(t);
+  broker.current().drop();
+  await clock.advance(TIMINGS.mqttBackoff[0]);
+  status(broker, 'ONLINE_RUNNING');
+  await clock.settle();
+  const refused = await press(gladys, device, 'pause');
+  assert.equal(refused.success, false);
+  assert.match(refused.error, /Playback state unknown/);
+  assert.deepEqual(broker.keys(), []);
+  ui(broker, LINEAR);
+  await clock.settle();
+  assert.equal((await press(gladys, device, 'pause')).success, true);
+  assert.deepEqual(
+    broker.keys().map(([, k]) => k),
+    ['MediaPlayPause'],
+  );
+});
+
+test('B: the playback state and its guard follow a UI status before its lookup ends', async (t) => {
+  const { gladys, cloud, broker, clock, device } = await running(t);
+  assert.equal((await press(gladys, device, 'pause')).success, true);
+  const release = cloud.hold('/v2/replayEvent/');
+  t.after(release);
+  ui(broker, { ...LINEAR, speed: 0, source: { ...LINEAR.source, eventId: 'crid:held' } });
+  await clock.settle();
+  assert.equal(gladys.fake.lastState(id('playback')), 0, 'published before the lookup');
+  // The guard ended on the expected state; the new state is known: play goes out.
+  assert.equal((await press(gladys, device, 'play')).success, true);
+  assert.deepEqual(
+    broker.keys().map(([, k]) => k),
+    ['MediaPlayPause', 'MediaPlayPause'],
+  );
+  release();
+  await clock.settle();
+});
+
+test('C: a refresh token received during a reconnection is kept and used', async (t) => {
+  const clock = fakeClock();
+  const cloud = fakeCloud({ operator: OPERATORS['be-nl'], now: clock.now });
+  const store = new MemoryStore();
+  const { gladys } = await setup(t, { config: TELENET, clock, cloud, store });
+  assert.equal(store.data.refresh.token, 'refresh-1');
+  const release = cloud.hold('/authorization/refresh');
+  t.after(release);
+  await clock.advance(TIMINGS.renewMax); // the renewal timer: its request is held
+  const action = gladys.fake.action('reconnect');
+  await clock.settle();
+  release();
+  const answer = await action;
+  await clock.settle();
+  assert.equal(answer.success, true);
+  assert.equal(store.data.block, null, 'never refused');
+  const refresh = cloud.requests.filter((r) => r.url.endsWith('/authorization/refresh'));
+  assert.deepEqual(
+    refresh.map((r) => r.body.refreshToken),
+    ['typed-refresh', 'refresh-1', 'refresh-2'],
+    'the new session starts from the token the old one received',
+  );
+  assert.equal(store.data.refresh.token, 'refresh-3');
+});
+
+test('D: stop waits for the writes in flight', async (t) => {
+  const { app } = await setup(t);
+  let flushed = false;
+  app.store.flush = () =>
+    new Promise((resolve) =>
+      setImmediate(() => {
+        flushed = true;
+        resolve();
+      }),
+    );
+  await app.stop();
+  assert.equal(flushed, true);
+});
+
+test('E: a 429 of a renewal after a 401 pauses everything', async (t) => {
+  const { app, cloud, clock, store } = await running(t);
+  cloud.accessToken = 'revoked';
+  cloud.auth = 'rate';
+  cloud.retryAfter = 300;
+  await app.refreshAccount();
+  await clock.settle();
+  assert.equal(store.data.pause.until, clock.now() + 300_000);
+});
+
+test('a 401 that a renewal does not end: renewals spaced 1 min, 15 min, then 1 h', async (t) => {
+  const { app, cloud, clock } = await running(t);
+  cloud.failures.set('/v1/customer/', 401);
+  const renewals = () => cloud.count('/authorization/refresh');
+  const tryOnce = async () => {
+    await app.refreshAccount();
+    await clock.settle();
+  };
+  const base = renewals();
+  await tryOnce();
+  assert.equal(renewals(), base + 1);
+  await clock.advance(2 * 60_000);
+  await tryOnce();
+  assert.equal(renewals(), base + 1, 'not after 2 minutes: 15 now');
+  await clock.advance(15 * 60_000);
+  await tryOnce();
+  assert.equal(renewals(), base + 2);
+  await clock.advance(16 * 60_000);
+  await tryOnce();
+  assert.equal(renewals(), base + 2, 'one hour now');
+  await clock.advance(60 * 60_000);
+  await tryOnce();
+  assert.equal(renewals(), base + 3);
+});
+
+test('any refusal of the refresh endpoint is a refusal of the token', async (t) => {
+  const clock = fakeClock();
+  const cloud = fakeCloud({ operator: OPERATORS['be-nl'], now: clock.now });
+  cloud.auth = 'credentials';
+  const { store, gladys } = await setup(t, { config: TELENET, clock, cloud });
+  assert.equal(store.data.block.reason, 'token');
+  assert.match(gladys.fake.connectionStatus.message.en, /refresh token/);
+});
+
+test('a broker that never answers the subscription: closed, tried again later', async (t) => {
+  const clock = fakeClock();
+  const broker = fakeBroker();
+  broker.silentSubscribe = true;
+  await setup(t, { clock, broker });
+  const [first] = broker.connections;
+  assert.equal(first.ended, false);
+  await clock.advance(TIMINGS.mqttConnectTimeout);
+  assert.equal(first.ended, true);
+  await clock.advance(TIMINGS.mqttBackoff[0]);
+  assert.equal(broker.connections.length, 2);
+});
+
+test('lookups: a failure is not asked again for 10 min; one lookup at a time per box', async (t) => {
+  const { cloud, broker, clock, gladys } = await running(t);
+  cloud.failures.set('/v2/replayEvent/', 500);
+  const asked = () => cloud.count('/v2/replayEvent/');
+  const other = { ...LINEAR, source: { ...LINEAR.source, eventId: 'crid:missing' } };
+  const before = asked();
+  ui(broker, other);
+  await clock.settle();
+  ui(broker, other);
+  await clock.settle();
+  assert.equal(asked(), before + 1);
+  await clock.advance(TIMINGS.lookupRetry);
+  ui(broker, other);
+  await clock.settle();
+  assert.equal(asked(), before + 2);
+
+  cloud.failures.clear();
+  const release = cloud.hold('/v2/replayEvent/');
+  t.after(release);
+  const burst = (n) =>
+    ui(broker, { ...LINEAR, source: { ...LINEAR.source, eventId: `crid:burst-${n}` } });
+  burst(1);
+  await clock.settle();
+  burst(2);
+  burst(3);
+  await clock.settle();
+  assert.equal(asked(), before + 3, 'one in flight');
+  release();
+  await clock.settle(200);
+  const urls = cloud.requests.filter((r) => r.url.includes('crid%3Aburst')).map((r) => r.url);
+  assert.equal(urls.length, 2, 'the middle one is skipped');
+  assert.ok(urls[1].includes('burst-3'));
+  assert.equal(gladys.fake.lastState(id('channel')), 'NPO 1');
+});
+
+test('the live link removes only its own listeners', async (t) => {
+  const { app, broker, clock } = await setup(t);
+  const client = broker.current();
+  const foreign = () => {};
+  client.on('message', foreign);
+  client.on('close', foreign);
+  app.live.stop();
+  await clock.settle();
+  assert.deepEqual(client.listeners('message'), [foreign]);
+  assert.deepEqual(client.listeners('close'), [foreign]);
 });

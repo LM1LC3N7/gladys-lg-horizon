@@ -25,6 +25,9 @@ class FakeClient extends EventEmitter {
   subscribe(topic, _options, callback) {
     this.subscriptions.push(topic);
     const refused = this.broker.refuseStatus && String(topic).endsWith('/+/status');
+    if (this.broker.silentSubscribe) {
+      return;
+    }
     setImmediate(() => callback?.(refused ? new Error('Subscribe error: Not authorized') : null));
   }
 
