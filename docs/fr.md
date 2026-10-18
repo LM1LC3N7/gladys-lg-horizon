@@ -1,67 +1,132 @@
-# Template de démonstration
+# LG Horizon pour Gladys
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Cette intégration amène dans Gladys les décodeurs **LG Horizon** (Mediabox
+Next, Next Mini, TV Box, 360 Box…) de votre compte d'opérateur, par le cloud de
+l'opérateur : la même API (REST et MQTT) que l'application et le site TV web.
 
-## Ce que vous obtenez
+> **Attention : cette intégration n'a jamais été testée avec un vrai compte.**
+> Elle a été écrite d'après la bibliothèque lghorizon et testée seulement avec
+> des réponses simulées. Vos retours sont les bienvenus sur le forum de Gladys.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Non officielle, sans lien avec LG, Liberty Global ni les opérateurs cités.
+
+## Opérateurs
+
+| Opérateur        | Pays        | Connexion                   |
+| ---------------- | ----------- | --------------------------- |
+| Ziggo            | Pays-Bas    | identifiant et mot de passe |
+| Telenet          | Belgique    | jeton de rafraîchissement   |
+| BASE TV          | Belgique    | jeton de rafraîchissement   |
+| Sunrise (ex-UPC) | Suisse      | jeton de rafraîchissement   |
+| Virgin Media     | Royaume-Uni | jeton de rafraîchissement   |
+| Virgin Media     | Irlande     | identifiant et mot de passe |
+| UPC              | Pologne     | identifiant et mot de passe |
+
+Ce que dit la bibliothèque de référence (lghorizon 0.12.2, octobre 2026) :
+
+- **Ziggo** et **Telenet** sont les plus suivis : des correctifs récents
+  (juillet 2026 pour Ziggo) et des tickets ouverts en 2026. Un ticket Telenet
+  de septembre 2026 signale une connexion qui reste bloquée avec un jeton de
+  rafraîchissement, sans solution à ce jour.
+- **Sunrise** et **Virgin Media (UK et Irlande)** ont connu des refus de
+  connexion début 2026, réglés depuis selon les tickets fermés.
+- **BASE TV** et **UPC Pologne** figurent dans le code sans retour récent.
+- **Magenta TV (Autriche) n'est pas pris en charge** : il n'a jamais figuré
+  dans lghorizon (aucune adresse d'API connue pour lui), et aucun ticket ne
+  le mentionne.
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+1. Choisissez votre **opérateur**.
+2. Selon l'opérateur :
+   - **Ziggo, Virgin Media Irlande, UPC** : saisissez l'**identifiant**
+     (souvent l'adresse e-mail) et le **mot de passe** du compte.
+   - **Telenet, BASE, Sunrise, Virgin Media UK** : collez un **jeton de
+     rafraîchissement** (refresh token), voir ci-dessous.
+3. Enregistrez. Les décodeurs du compte apparaissent dans l'onglet
+   **Découverte** : ajoutez ceux que vous voulez.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+Le mot de passe et le jeton sont gardés par Gladys dans sa base, jamais
+réaffichés, et envoyés seulement au service de connexion de votre opérateur.
 
-## Actions
+### Obtenir un jeton de rafraîchissement
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+1. Sur un ordinateur, ouvrez le site TV web de votre opérateur (par exemple
+   telenet.tv, sunrisetv.ch, virgintvgo.virginmedia.com) et connectez-vous.
+2. Ouvrez les outils de développement du navigateur (F12), onglet
+   **Application** (Chrome, Edge) ou **Stockage** (Firefox), puis **Stockage
+   local** du site.
+3. Copiez la valeur de la clé qui contient `refreshToken` (par exemple
+   `flutter._WEB_SECURE_STORAGE_refreshToken` sur certains sites).
+4. Collez-la dans le champ **Jeton de rafraîchissement** et enregistrez.
 
-## Scènes
+Le jeton change à chaque usage : l'intégration garde le plus récent dans son
+volume `/data` (fichier lisible seulement par l'intégration) et s'en sert aux
+redémarrages. Si vous vous déconnectez du site web, le jeton peut cesser de
+fonctionner : collez-en un nouveau.
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+## Ce que montre chaque décodeur
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+| Fonctionnalité                     | Type          | Valeurs                                                                             |
+| ---------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
+| Allumé                             | lecture seule | 1 en marche, 0 en veille ou hors ligne                                              |
+| Joignable                          | lecture seule | 1 joignable par le cloud (marche ou veille), 0 hors ligne                           |
+| Chaîne                             | texte         | nom de la chaîne en cours, « — » sinon                                              |
+| Programme                          | texte         | titre (et épisode) du programme, de la VOD, de l'enregistrement ou de l'application |
+| En lecture                         | lecture seule | 1 en lecture, 0 en pause ou éteint                                                  |
+| Allumer                            | bouton        | sort de veille                                                                      |
+| Mettre en veille                   | bouton        | met en veille                                                                       |
+| Lecture, Pause                     | boutons       | reprend, met en pause                                                               |
+| Chaîne suivante, Chaîne précédente | boutons       | change de chaîne                                                                    |
 
-## Tableau de bord
+Pas de **volume** : le cloud de l'opérateur n'a pas de touche de volume (le
+volume se règle sur le téléviseur).
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Les noms des fonctionnalités sont en français ou en anglais selon l'option
+« Langue des noms des fonctionnalités ».
 
-## Dépannage
+## Commandes
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+Le décodeur ne connaît qu'une touche marche/veille (bascule) et une touche
+lecture/pause (bascule). Pour éviter qu'un appui fasse l'inverse de ce qui est
+demandé :
+
+- la touche part seulement si l'état reçu en direct du décodeur est l'inverse
+  de ce qui est demandé (« Allumer » sur un décodeur déjà allumé ne fait rien) ;
+- si l'état est inconnu (décodeur hors ligne, liaison en direct coupée ou pas
+  encore d'état reçu), rien n'est envoyé et Gladys affiche une erreur ;
+- après un appui, toute autre commande marche/veille est ignorée jusqu'à ce
+  que le décodeur annonce le nouvel état (45 s au plus), de même pour
+  lecture/pause (10 s au plus).
+
+Marche et veille sont des **boutons**, pas un interrupteur : un « tout
+éteindre » d'un assistant vocal ou d'une scène ne peut pas les déclencher.
+
+## Statut et erreurs
+
+- **Identifiants refusés** : l'intégration s'arrête et ne réessaie pas toute
+  seule (un mot de passe essayé encore et encore peut bloquer le compte). Cet
+  arrêt est gardé après un redémarrage. Corrigez la configuration (de nouveaux
+  identifiants sont essayés aussitôt) ou cliquez sur **Se reconnecter** (un
+  seul essai).
+- **Trop de requêtes (429)** : une pause de 1 minute à 6 heures, gardée après
+  un redémarrage.
+- **Cloud injoignable** : nouvel essai après 1, 2, 5, 15 puis 30 minutes.
+- **Liaison en direct coupée** : nouvel essai après 30 s, 1, 2, 5, 10 puis 15
+  minutes ; une liaison qui s'ouvre puis se coupe aussitôt ne fait pas de
+  boucle.
+
+La session est renouvelée par un minuteur, un jour avant l'expiration du
+jeton de rafraîchissement (toutes les 12 heures au plus).
+
+## Confidentialité
+
+L'intégration parle seulement au cloud de votre opérateur : en HTTPS pour l'API
+et par une WebSocket sécurisée (TLS) pour le MQTT. Elle lit la liste des
+décodeurs, la liste des chaînes et le titre de ce qui est regardé ; elle
+n'envoie rien d'autre que les touches demandées.
+
+## Remerciements
+
+Port en JavaScript de [lghorizon](https://github.com/Sholofly/lghorizon-python)
+(MIT), la bibliothèque de l'intégration Home Assistant.

@@ -12,44 +12,27 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
+- LG Horizon set-top boxes of Ziggo, Telenet, BASE, Sunrise, Virgin Media (UK
+  and Ireland) and UPC Poland accounts, through the operator's cloud: a
+  JavaScript port of lghorizon 0.12.2 (MIT). Magenta TV (Austria) is not
+  supported (never in lghorizon).
+- Login with the user name and password, or with a refresh token; the newest
+  refresh token is kept in `/data`. Session renewed by a timer.
+- Refused credentials stop the integration, across restarts too, without any
+  automatic retry; new credentials or the "Reconnect" button try once.
+- 429 pauses (1 minute to 6 hours) kept across restarts; growing delays after
+  network or server errors.
+- Live link over MQTT (secure WebSocket) with spaced reconnections that never
+  loop on a socket that opens then drops.
+- Per box: power and reachability (read only), channel, program, playing or
+  paused; push buttons to wake up, put in standby, play, pause, next and
+  previous channel. No volume (the cloud has no volume key).
+- Power and play/pause keys sent only toward the opposite of the state the box
+  reported live, and guarded until the box reports the expected state.
+- Status and Discovery published again at every connection to Gladys; a
+  device published again keeps every feature of the created one.
+- Feature names in French or English.
+- `LICENSE` (Apache-2.0) and `THIRD_PARTY_NOTICES.md` (lghorizon, MIT), copied
+  into the image.
 
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-lg-horizon/commits/main

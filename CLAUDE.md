@@ -8,16 +8,20 @@ contributors.
 A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
 no build step) that runs in its own sandboxed Docker container and talks to
 Gladys through
-[`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
-its only runtime dependency. It started from the official JavaScript template.
+[`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js).
+Its other runtime dependency is [MQTT.js](https://github.com/mqttjs/MQTT.js)
+(MIT, the live link with the boxes). It started from the official JavaScript
+template. It brings LG Horizon set-top boxes into Gladys through the
+operator's cloud, a JavaScript port of lghorizon 0.12.2 (MIT, see
+`THIRD_PARTY_NOTICES.md`).
 
 ## Commands
 
 ```bash
 npm install
 npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test test/app.test.js              # one file
+node --test --test-name-pattern "Telenet" # tests whose name matches
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
@@ -32,15 +36,22 @@ pushing.
 
 ```
 index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+src/handlers.js                   the SDK handlers -> HorizonApp (shared with the tests)
+src/app.js                        HorizonApp: phases, refusals and pauses, live link, commands, status
+src/model.js                      boxes -> Gladys devices and states (pure)
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+src/store.js                      /data/lg-horizon.json: boxes, refresh token, refusal, pause
+src/constants.js                  frozen keys, operators, remote keys, timings, limits
+src/i18n.js                       texts shown in Gladys (en/fr)
+src/horizon/session.js            login / refresh, error codes 97401 / 97402
+src/horizon/api.js                REST calls (backoffice config, customer, channels, lookups, MQTT token)
+src/horizon/live.js               MQTT over WSS (MQTT.js), own reconnection
+src/horizon/parse.js              readers of the answers and messages (pure)
+src/horizon/http.js               fetch with timeout and size cap, cookie jar
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+test/                             node --test: fake Gladys, fake cloud (fetch), fake broker, fake clock
+scripts/cover.mjs                 cover.png generator (plain Node)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
