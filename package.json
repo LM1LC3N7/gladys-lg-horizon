@@ -1,6 +1,6 @@
 {
   "name": "gladys-lg-horizon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for LG Horizon set-top boxes (Ziggo, Telenet, BASE, Sunrise, Virgin Media, UPC), through the operator cloud (REST and MQTT). Unofficial, not affiliated with LG, Liberty Global or the operators.",
   "type": "module",

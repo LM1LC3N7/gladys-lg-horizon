@@ -6,8 +6,8 @@
     "en": "LG Horizon boxes of Ziggo, Telenet, BASE, Sunrise, Virgin Media and UPC, via the operator cloud.",
     "fr": "Décodeurs LG Horizon de Ziggo, Telenet, BASE, Sunrise, Virgin Media et UPC, par le cloud opérateur."
   },
-  "version": "0.1.0",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-lg-horizon:0.1.0",
+  "version": "0.1.1",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-lg-horizon:0.1.1",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-lg-horizon/main/cover.png",
   "categories": ["multimedia"],

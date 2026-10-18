@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-18
+
 ### Added
 
 - LG Horizon set-top boxes of Ziggo, Telenet, BASE, Sunrise, Virgin Media (UK
@@ -50,4 +52,5 @@ the notes of the version's GitHub Release.
   WebSocket frames are capped.
 - Failed program lookups wait 10 minutes; one lookup at a time per box.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-lg-horizon/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-lg-horizon/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-lg-horizon/releases/tag/v0.1.1
