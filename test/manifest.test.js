@@ -32,7 +32,7 @@ function* texts(node, path = '') {
 test('the store basics', () => {
   assert.equal(manifest.manifest_version, 1);
   assert.equal(manifest.type, 'device');
-  assert.match(manifest.gladys_version, /^>=5\.1\.0$/);
+  assert.match(manifest.gladys_version, /^>=5\.3\.0$/);
   const pkg = JSON.parse(read('package.json'));
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(manifest.version, pkg.version);
@@ -111,4 +111,13 @@ test('the actions are the ones the code handles', () => {
   assert.equal(manifest.scene_triggers, undefined);
   assert.equal(manifest.widgets, undefined);
   assert.equal(manifest.network_discovery, undefined);
+});
+
+test('the catalog countries: the Netherlands, Belgium, Switzerland, the United Kingdom, Ireland and Poland, which needs Gladys >= 5.3.0', () => {
+  assert.deepEqual(manifest.countries, ['NL', 'BE', 'CH', 'GB', 'IE', 'PL']);
+  const [major, minor] = manifest.gladys_version
+    .match(/>=\s*(\d+)\.(\d+)/)
+    .slice(1)
+    .map(Number);
+  assert.ok(major > 5 || (major === 5 && minor >= 3), 'countries needs Gladys 5.3.0');
 });
